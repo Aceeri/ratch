@@ -1,8 +1,9 @@
 extern crate clap;
+extern crate duct;
 
 mod error;
 
-use std::io::{Write, Read, stdout};
+use std::io::{stdout, Read, Write};
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::Duration;
@@ -53,7 +54,14 @@ fn main() -> Result<(), RatchError> {
     let mut buffer: Vec<u8> = Vec::new();
     loop {
         buffer.clear();
-        
+
+        let output = duct::cmd(command[0], &command[1..])
+            .stderr_to_stdout()
+            .read()?;
+
+        println!("{}", output);
+
+        /*
         let spawn_result = Command::new(command[0])
             .args(&command[1..])
             .stdout(Stdio::piped())
@@ -63,8 +71,8 @@ fn main() -> Result<(), RatchError> {
         let mut child = spawn_result?;
         let _done = child.wait()?;
         //match done.code() {
-            //Some(code) => println!("Process exitted with status code: {}", code),
-            //None => println!("Process terminated by signal"),
+        //Some(code) => println!("Process exitted with status code: {}", code),
+        //None => println!("Process terminated by signal"),
         //}
 
         if let Some(ref mut stdout) = child.stdout {
@@ -76,6 +84,7 @@ fn main() -> Result<(), RatchError> {
         }
 
         stdout().write(&buffer);
+        */
 
         thread::sleep(Duration::from_nanos((interval * 1_000_000_000.0) as u64));
     }
