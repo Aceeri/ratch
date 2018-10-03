@@ -53,20 +53,19 @@ fn main() -> Result<(), RatchError> {
     let mut buffer: Vec<u8> = Vec::new();
     loop {
         buffer.clear();
-
-        let spawn_result = Command::new("sh")
-            .arg("-c")
-            .args(command.clone())
+        
+        let spawn_result = Command::new(command[0])
+            .args(&command[1..])
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn();
 
         let mut child = spawn_result?;
-        let done = child.wait()?;
-        match done.code() {
-            Some(code) => println!("Process exitted with status code: {}", code),
-            None => println!("Process terminated by signal"),
-        }
+        let _done = child.wait()?;
+        //match done.code() {
+            //Some(code) => println!("Process exitted with status code: {}", code),
+            //None => println!("Process terminated by signal"),
+        //}
 
         if let Some(ref mut stdout) = child.stdout {
             stdout.read_to_end(&mut buffer);
@@ -76,11 +75,7 @@ fn main() -> Result<(), RatchError> {
             stderr.read_to_end(&mut buffer);
         }
 
-        //println!("buffer:");
-        println!("buffer: {:?}", buffer);
-        //print!("`");
         stdout().write(&buffer);
-        //print!("`");
 
         thread::sleep(Duration::from_nanos((interval * 1_000_000_000.0) as u64));
     }
