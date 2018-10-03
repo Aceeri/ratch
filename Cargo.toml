@@ -1,0 +1,8 @@
+[package]
+name = "ratch"
+version = "0.1.0"
+authors = ["Aceeri <conmcclusk@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+clap = "2.23.0"
