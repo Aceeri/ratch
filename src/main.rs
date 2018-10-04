@@ -1,6 +1,7 @@
 extern crate clap;
 extern crate duct;
 extern crate os_pipe;
+extern crate pancurses;
 
 mod error;
 
@@ -11,6 +12,8 @@ use std::time::Duration;
 
 use self::error::RatchError;
 use clap::{App, AppSettings, Arg, SubCommand};
+
+use pancurses::{endwin, initscr, noecho, Input};
 
 fn parse_interval(interval: Option<&str>) -> Result<f64, RatchError> {
     match interval {
@@ -27,7 +30,7 @@ fn parse_interval(interval: Option<&str>) -> Result<f64, RatchError> {
     }
 }
 
-fn main() -> Result<(), RatchError> {
+fn run() -> Result<(), RatchError> {
     let matches = App::with_defaults("My Program")
         .author("Aceeri <conmcclusk@gmail.com>")
         .about("A better `watch`")
@@ -49,11 +52,24 @@ fn main() -> Result<(), RatchError> {
         Some(command) => command.collect::<Vec<&str>>(),
         None => return Err(RatchError::ParseError("command not found".to_string())),
     };
+    let window = initscr();
+
+    window.nodelay(true);
+    noecho();
 
     println!("Command: {:?}", command.clone());
-    let mut buffer: Vec<u8> = Vec::new();
-    loop {
+    let mut buffer = String::new();
+    'top: loop {
+        loop {
+            match window.getch() {
+                Some(Input::KeyDC) => break 'top,
+                Some(_) => (),
+                None => break,
+            }
+        }
+
         buffer.clear();
+        window.erase();
 
         let (mut read, write) = os_pipe::pipe()?;
         let child = duct::cmd(command[0], &command[1..])
@@ -61,12 +77,19 @@ fn main() -> Result<(), RatchError> {
             .stdout_handle(write)
             .start()?;
 
-        read.read_to_end(&mut buffer)?;
+        read.read_to_string(&mut buffer)?;
         child.wait()?;
-        std::io::stdout().write(&buffer);
+        window.printw(&buffer);
+        window.refresh();
 
         thread::sleep(Duration::from_nanos((interval * 1_000_000_000.0) as u64));
     }
 
     Ok(())
+}
+
+fn main() -> Result<(), RatchError> {
+    let result = run();
+    endwin();
+    result
 }
