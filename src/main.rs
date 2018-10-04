@@ -5,13 +5,12 @@ extern crate pancurses;
 
 mod error;
 
-use std::io::{stdout, Read, Write};
-use std::process::{Command, Stdio};
+use std::io::Read;
 use std::thread;
-use std::time::{Instant, Duration};
+use std::time::{Duration, Instant};
 
 use self::error::RatchError;
-use clap::{App, AppSettings, Arg, SubCommand};
+use clap::{App, AppSettings, Arg};
 
 use pancurses::{endwin, initscr, noecho, Input};
 
@@ -42,7 +41,8 @@ fn run() -> Result<(), RatchError> {
                 .takes_value(true)
                 .default_value("2.0")
                 .help("Interval to update the program"),
-        ).arg(Arg::with_name("command").required(true).multiple(true))
+        )
+        .arg(Arg::with_name("command").required(true).multiple(true))
         .get_matches();
 
     let interval = parse_interval(matches.value_of("interval"))?;
@@ -70,8 +70,14 @@ fn run() -> Result<(), RatchError> {
         loop {
             match window.getch() {
                 Some(Input::KeyDC) => break 'top,
-                Some(Input::Character('j')) => { vertical_cursor = vertical_cursor.saturating_add(1); redraw = true; },
-                Some(Input::Character('k')) => { vertical_cursor = vertical_cursor.saturating_sub(1); redraw = true; },
+                Some(Input::Character('j')) => {
+                    vertical_cursor = vertical_cursor.saturating_add(1);
+                    redraw = true;
+                }
+                Some(Input::Character('k')) => {
+                    vertical_cursor = vertical_cursor.saturating_sub(1);
+                    redraw = true;
+                }
                 Some(_) => (),
                 None => break,
             }
@@ -98,7 +104,11 @@ fn run() -> Result<(), RatchError> {
         }
 
         if redraw {
-            let skipped = buffer.lines().skip(vertical_cursor).map(|line| line.to_owned() + "\n").collect::<String>();
+            let skipped = buffer
+                .lines()
+                .skip(vertical_cursor)
+                .map(|line| line.to_owned() + "\n")
+                .collect::<String>();
             window.erase();
             window.printw(format!("cursor: {}\n", vertical_cursor));
             window.printw(&skipped);
