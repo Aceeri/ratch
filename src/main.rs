@@ -8,7 +8,7 @@ mod error;
 use std::io::{stdout, Read, Write};
 use std::process::{Command, Stdio};
 use std::thread;
-use std::time::Duration;
+use std::time::{Instant, Duration};
 
 use self::error::RatchError;
 use clap::{App, AppSettings, Arg, SubCommand};
@@ -47,6 +47,9 @@ fn run() -> Result<(), RatchError> {
 
     let interval = parse_interval(matches.value_of("interval"))?;
     println!("Interval: {:?}", interval);
+    let interval_duration = Duration::from_nanos((interval * 1_000_000_000.0) as u64);
+    let interval_secs = interval_duration.as_secs();
+    let interval_nanos = interval_duration.subsec_nanos();
 
     let command = match matches.values_of("command") {
         Some(command) => command.collect::<Vec<&str>>(),
@@ -57,32 +60,52 @@ fn run() -> Result<(), RatchError> {
     window.nodelay(true);
     noecho();
 
+    let mut vertical_cursor: usize = 0;
     println!("Command: {:?}", command.clone());
+
+    let mut last_instant = Instant::now();
     let mut buffer = String::new();
     'top: loop {
+        let mut redraw = false;
         loop {
             match window.getch() {
                 Some(Input::KeyDC) => break 'top,
+                Some(Input::Character('j')) => { vertical_cursor = vertical_cursor.saturating_add(1); redraw = true; },
+                Some(Input::Character('k')) => { vertical_cursor = vertical_cursor.saturating_sub(1); redraw = true; },
                 Some(_) => (),
                 None => break,
             }
         }
 
-        buffer.clear();
-        window.erase();
+        let elapsed = last_instant.elapsed();
+        let secs = elapsed.as_secs();
+        let nanos = elapsed.subsec_nanos();
 
-        let (mut read, write) = os_pipe::pipe()?;
-        let child = duct::cmd(command[0], &command[1..])
-            .stderr_to_stdout()
-            .stdout_handle(write)
-            .start()?;
+        if interval_secs <= secs && interval_nanos <= nanos {
+            last_instant = Instant::now();
 
-        read.read_to_string(&mut buffer)?;
-        child.wait()?;
-        window.printw(&buffer);
-        window.refresh();
+            buffer.clear();
+            let (mut read, write) = os_pipe::pipe()?;
+            let child = duct::cmd(command[0], &command[1..])
+                .stderr_to_stdout()
+                .stdout_handle(write)
+                .start()?;
 
-        thread::sleep(Duration::from_nanos((interval * 1_000_000_000.0) as u64));
+            read.read_to_string(&mut buffer)?;
+            child.wait()?;
+
+            redraw = true;
+        }
+
+        if redraw {
+            let skipped = buffer.lines().skip(vertical_cursor).map(|line| line.to_owned() + "\n").collect::<String>();
+            window.erase();
+            window.printw(format!("cursor: {}\n", vertical_cursor));
+            window.printw(&skipped);
+            window.refresh();
+        }
+
+        thread::sleep(Duration::from_millis(8));
     }
 
     Ok(())
