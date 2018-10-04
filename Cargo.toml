@@ -2,10 +2,12 @@
 name = "ratch"
 version = "0.1.0"
 authors = ["Aceeri <conmcclusk@gmail.com>"]
+description = "An alternative to `watch`, with scrolling buffers."
+license = "MIT/Apache-2.0"
 edition = "2018"
 
 [dependencies]
 clap = "2.23.0"
 duct = "0.11.1"
 os_pipe = "0.8.0"
-pancurses = "*"
+pancurses = "0.16.0"
