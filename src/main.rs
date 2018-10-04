@@ -1,5 +1,6 @@
 extern crate clap;
 extern crate duct;
+extern crate os_pipe;
 
 mod error;
 
@@ -10,7 +11,6 @@ use std::time::Duration;
 
 use self::error::RatchError;
 use clap::{App, AppSettings, Arg, SubCommand};
-//use std::error::Error;
 
 fn parse_interval(interval: Option<&str>) -> Result<f64, RatchError> {
     match interval {
@@ -55,36 +55,15 @@ fn main() -> Result<(), RatchError> {
     loop {
         buffer.clear();
 
-        let output = duct::cmd(command[0], &command[1..])
+        let (mut read, write) = os_pipe::pipe()?;
+        let child = duct::cmd(command[0], &command[1..])
             .stderr_to_stdout()
-            .read()?;
+            .stdout_handle(write)
+            .start()?;
 
-        println!("{}", output);
-
-        /*
-        let spawn_result = Command::new(command[0])
-            .args(&command[1..])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn();
-
-        let mut child = spawn_result?;
-        let _done = child.wait()?;
-        //match done.code() {
-        //Some(code) => println!("Process exitted with status code: {}", code),
-        //None => println!("Process terminated by signal"),
-        //}
-
-        if let Some(ref mut stdout) = child.stdout {
-            stdout.read_to_end(&mut buffer);
-        }
-
-        if let Some(ref mut stderr) = child.stderr {
-            stderr.read_to_end(&mut buffer);
-        }
-
-        stdout().write(&buffer);
-        */
+        read.read_to_end(&mut buffer)?;
+        child.wait()?;
+        std::io::stdout().write(&buffer);
 
         thread::sleep(Duration::from_nanos((interval * 1_000_000_000.0) as u64));
     }
