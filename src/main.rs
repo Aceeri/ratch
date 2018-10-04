@@ -63,7 +63,7 @@ fn run() -> Result<(), RatchError> {
     let mut vertical_cursor: usize = 0;
     println!("Command: {:?}", command.clone());
 
-    let mut last_instant = Instant::now();
+    let mut last_instant = Instant::now() - interval_duration;
     let mut buffer = String::new();
     'top: loop {
         let mut redraw = false;
