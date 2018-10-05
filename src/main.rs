@@ -94,6 +94,7 @@ fn run() -> Result<(), RatchError> {
 
     let mut last_instant = Instant::now() - interval_duration;
 
+    let mut current_msg = 0;
     let mut lines = Vec::new();
     'top: loop {
         let mut redraw = false;
@@ -117,9 +118,11 @@ fn run() -> Result<(), RatchError> {
         }
 
         match receiver.try_recv() {
-            Ok(split) => {
-                lines = split;
-                redraw = true;
+            Ok((msg, split)) => {
+                if msg >= current_msg {
+                    lines = split;
+                    redraw = true;
+                }
             },
             Err(TryRecvError::Empty) => (),
             Err(TryRecvError::Disconnected) => (),
@@ -134,8 +137,11 @@ fn run() -> Result<(), RatchError> {
 
             let command = command.clone();
             let command_sender = sender.clone();
+
+            current_msg += 1;
+            let counter = current_msg.clone();
             thread::spawn(move || {
-                command_sender.send(run_command(&command).unwrap()).unwrap();
+                command_sender.send((counter, run_command(&command).unwrap())).unwrap();
             });
         }
 
