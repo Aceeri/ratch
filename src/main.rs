@@ -42,11 +42,11 @@ fn run() -> Result<(), RatchError> {
                 .default_value("2.0")
                 .help("Interval to update the program"),
         )
-        //.arg(Arg::with_name("async")
-                //.short("a")
-                //.long("async")
-                //.help("Run the command asynchronously every interval, does not wait for the previous command to finish.")
-        //)
+        .arg(Arg::with_name("async")
+                .short("a")
+                .long("async")
+                .help("Run the command asynchronously every interval, does not wait for the previous command to finish.")
+        )
         .arg(Arg::with_name("command").required(true).multiple(true))
         .get_matches();
 
@@ -64,6 +64,7 @@ fn run() -> Result<(), RatchError> {
     };
     let window = initscr();
 
+    window.keypad(true);
     window.nodelay(true);
     noecho();
 
@@ -78,14 +79,16 @@ fn run() -> Result<(), RatchError> {
         loop {
             match window.getch() {
                 Some(Input::KeyDC) => break 'top,
-                Some(Input::Character('j')) => {
+                Some(Input::Character('j')) |
+                Some(Input::KeyDown)=> {
                     vertical_cursor = vertical_cursor.saturating_add(1);
                     if vertical_cursor > split.len() - 1  {
                         vertical_cursor = split.len() - 1 ;
                     }
                     redraw = true;
                 }
-                Some(Input::Character('k')) => {
+                Some(Input::Character('k')) |
+                Some(Input::KeyUp) => {
                     vertical_cursor = vertical_cursor.saturating_sub(1);
                     redraw = true;
                 }
