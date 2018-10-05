@@ -6,11 +6,14 @@ extern crate pancurses;
 mod error;
 
 use std::io::Read;
+use std::sync::mpsc::TryRecvError;
+use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
 use self::error::RatchError;
 use clap::{App, AppSettings, Arg};
+use duct::Expression;
 
 use pancurses::{endwin, initscr, noecho, Input};
 
@@ -27,6 +30,21 @@ fn parse_interval(interval: Option<&str>) -> Result<f64, RatchError> {
             "Interval value not found".to_owned(),
         )),
     }
+}
+
+fn run_command(command: &Expression) -> Result<Vec<String>, RatchError> {
+    let (mut read, write) = os_pipe::pipe()?;
+
+    let child = command.stdout_handle(write).start()?;
+
+    let mut buffer = String::new();
+    read.read_to_string(&mut buffer)?;
+    child.wait()?;
+
+    Ok(buffer
+        .lines()
+        .map(|line| line.to_owned() + "\n")
+        .collect::<Vec<String>>())
 }
 
 fn run() -> Result<(), RatchError> {
@@ -62,39 +80,49 @@ fn run() -> Result<(), RatchError> {
         Some(command) => command.collect::<Vec<&str>>(),
         None => return Err(RatchError::ParseError("command not found".to_string())),
     };
-    let window = initscr();
 
+    println!("Command: {:?}", command.clone());
+    let command = duct::cmd(command[0], &command[1..]).stderr_to_stdout();
+    let window = initscr();
     window.keypad(true);
     window.nodelay(true);
     noecho();
 
     let mut vertical_cursor: usize = 0;
-    println!("Command: {:?}", command.clone());
+
+    let (sender, receiver) = mpsc::channel();
 
     let mut last_instant = Instant::now() - interval_duration;
-    let mut buffer = String::new();
-    let mut split = Vec::new();
+
+    let mut lines = Vec::new();
     'top: loop {
         let mut redraw = false;
         loop {
             match window.getch() {
                 Some(Input::KeyDC) => break 'top,
-                Some(Input::Character('j')) |
-                Some(Input::KeyDown)=> {
+                Some(Input::Character('j')) | Some(Input::KeyDown) => {
                     vertical_cursor = vertical_cursor.saturating_add(1);
-                    if vertical_cursor > split.len() - 1  {
-                        vertical_cursor = split.len() - 1 ;
+                    if vertical_cursor > lines.len() - 1 {
+                        vertical_cursor = lines.len() - 1;
                     }
                     redraw = true;
                 }
-                Some(Input::Character('k')) |
-                Some(Input::KeyUp) => {
+                Some(Input::Character('k')) | Some(Input::KeyUp) => {
                     vertical_cursor = vertical_cursor.saturating_sub(1);
                     redraw = true;
                 }
                 Some(_) => (),
                 None => break,
             }
+        }
+
+        match receiver.try_recv() {
+            Ok(split) => {
+                lines = split;
+                redraw = true;
+            },
+            Err(TryRecvError::Empty) => (),
+            Err(TryRecvError::Disconnected) => (),
         }
 
         let elapsed = last_instant.elapsed();
@@ -104,28 +132,21 @@ fn run() -> Result<(), RatchError> {
         if interval_secs <= secs && interval_nanos <= nanos {
             last_instant = Instant::now();
 
-            buffer.clear();
-            let (mut read, write) = os_pipe::pipe()?;
-            let child = duct::cmd(command[0], &command[1..])
-                .stderr_to_stdout()
-                .stdout_handle(write)
-                .start()?;
-
-            read.read_to_string(&mut buffer)?;
-            child.wait()?;
-
-            split = buffer
-                .lines()
-                .map(|line| line.to_owned() + "\n")
-                .collect::<Vec<String>>();
-
-            redraw = true;
+            let command = command.clone();
+            let command_sender = sender.clone();
+            thread::spawn(move || {
+                command_sender.send(run_command(&command).unwrap()).unwrap();
+            });
         }
 
         if redraw {
             window.erase();
             window.printw(format!("cursor: {}\n", vertical_cursor));
-            for line in split.iter().skip(vertical_cursor).take(window.get_max_y() as usize - 1) {
+            for line in lines
+                .iter()
+                .skip(vertical_cursor)
+                .take(window.get_max_y() as usize - 1)
+            {
                 window.printw(&line);
             }
             window.refresh();
