@@ -42,11 +42,18 @@ fn run() -> Result<(), RatchError> {
                 .default_value("2.0")
                 .help("Interval to update the program"),
         )
+        //.arg(Arg::with_name("async")
+                //.short("a")
+                //.long("async")
+                //.help("Run the command asynchronously every interval, does not wait for the previous command to finish.")
+        //)
         .arg(Arg::with_name("command").required(true).multiple(true))
         .get_matches();
 
     let interval = parse_interval(matches.value_of("interval"))?;
     println!("Interval: {:?}", interval);
+    println!("Async: {}", matches.is_present("async"));
+
     let interval_duration = Duration::from_nanos((interval * 1_000_000_000.0) as u64);
     let interval_secs = interval_duration.as_secs();
     let interval_nanos = interval_duration.subsec_nanos();
@@ -65,6 +72,7 @@ fn run() -> Result<(), RatchError> {
 
     let mut last_instant = Instant::now() - interval_duration;
     let mut buffer = String::new();
+    let mut split = Vec::new();
     'top: loop {
         let mut redraw = false;
         loop {
@@ -72,6 +80,9 @@ fn run() -> Result<(), RatchError> {
                 Some(Input::KeyDC) => break 'top,
                 Some(Input::Character('j')) => {
                     vertical_cursor = vertical_cursor.saturating_add(1);
+                    if vertical_cursor > split.len() - 1  {
+                        vertical_cursor = split.len() - 1 ;
+                    }
                     redraw = true;
                 }
                 Some(Input::Character('k')) => {
@@ -100,18 +111,20 @@ fn run() -> Result<(), RatchError> {
             read.read_to_string(&mut buffer)?;
             child.wait()?;
 
+            split = buffer
+                .lines()
+                .map(|line| line.to_owned() + "\n")
+                .collect::<Vec<String>>();
+
             redraw = true;
         }
 
         if redraw {
-            let skipped = buffer
-                .lines()
-                .skip(vertical_cursor)
-                .map(|line| line.to_owned() + "\n")
-                .collect::<String>();
             window.erase();
             window.printw(format!("cursor: {}\n", vertical_cursor));
-            window.printw(&skipped);
+            for line in split.iter().skip(vertical_cursor).take(window.get_max_y() as usize - 1) {
+                window.printw(&line);
+            }
             window.refresh();
         }
 
