@@ -156,10 +156,7 @@ fn run() -> Result<(), RatchError> {
             thread::spawn(move || {
                 let message = match run_command(&command) {
                     Ok(result) => result,
-                    Err(err) => match err {
-                        RatchError::IoError(io_error) => vec![io_error.to_string()],
-                        _ => vec![format!("Unknown error type: {:?}", err)],
-                    },
+                    Err(err) => vec![err.to_string()],
                 };
 
                 match command_sender.send((counter, message)) {
