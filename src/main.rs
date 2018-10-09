@@ -6,8 +6,8 @@ extern crate pancurses;
 mod error;
 
 use std::io::Read;
-use std::sync::mpsc::TryRecvError;
 use std::sync::mpsc;
+use std::sync::mpsc::TryRecvError;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -48,7 +48,7 @@ fn run_command(command: &Expression) -> Result<Vec<String>, RatchError> {
 }
 
 fn run() -> Result<(), RatchError> {
-    let matches = App::with_defaults("My Program")
+    let matches = App::with_defaults("Ratch")
         .author("Aceeri <conmcclusk@gmail.com>")
         .about("A better `watch`")
         .setting(AppSettings::TrailingVarArg)
@@ -65,12 +65,20 @@ fn run() -> Result<(), RatchError> {
                 .long("async")
                 .help("Run the command asynchronously every interval, does not wait for the previous command to finish.")
         )
+        .arg(Arg::with_name("debug")
+             .short("d")
+             .long("debug")
+             .help("Prints debug information outside of the window")
+         )
         .arg(Arg::with_name("command").required(true).multiple(true))
         .get_matches();
 
+    let debug = matches.is_present("debug");
     let interval = parse_interval(matches.value_of("interval"))?;
-    println!("Interval: {:?}", interval);
-    println!("Async: {}", matches.is_present("async"));
+    if debug {
+        println!("Interval: {:?}", interval);
+        println!("Async: {}", matches.is_present("async"));
+    }
 
     let interval_duration = Duration::from_nanos((interval * 1_000_000_000.0) as u64);
     let interval_secs = interval_duration.as_secs();
@@ -81,7 +89,10 @@ fn run() -> Result<(), RatchError> {
         None => return Err(RatchError::ParseError("command not found".to_string())),
     };
 
-    println!("Command: {:?}", command.clone());
+    if debug {
+        println!("Command: {:?}", command.clone());
+    }
+
     let command = duct::cmd(command[0], &command[1..]).stderr_to_stdout();
     let window = initscr();
     window.keypad(true);
@@ -100,11 +111,13 @@ fn run() -> Result<(), RatchError> {
         let mut redraw = false;
         loop {
             match window.getch() {
-                Some(Input::KeyDC) => break 'top,
+                Some(Input::KeyDC) | Some(Input::Character('q')) | Some(Input::Character('Q')) => {
+                    break 'top
+                }
                 Some(Input::Character('j')) | Some(Input::KeyDown) => {
                     vertical_cursor = vertical_cursor.saturating_add(1);
-                    if vertical_cursor > lines.len() - 1 {
-                        vertical_cursor = lines.len() - 1;
+                    if vertical_cursor > lines.len() {
+                        vertical_cursor = lines.len();
                     }
                     redraw = true;
                 }
@@ -123,7 +136,7 @@ fn run() -> Result<(), RatchError> {
                     lines = split;
                     redraw = true;
                 }
-            },
+            }
             Err(TryRecvError::Empty) => (),
             Err(TryRecvError::Disconnected) => (),
         }
@@ -141,17 +154,28 @@ fn run() -> Result<(), RatchError> {
             current_msg += 1;
             let counter = current_msg.clone();
             thread::spawn(move || {
-                command_sender.send((counter, run_command(&command).unwrap())).unwrap();
+                let message = match run_command(&command) {
+                    Ok(result) => result,
+                    Err(err) => match err {
+                        RatchError::IoError(io_error) => vec![io_error.to_string()],
+                        _ => vec![format!("Unknown error type: {:?}", err)],
+                    },
+                };
+
+                match command_sender.send((counter, message)) {
+                    Ok(_sent) => (),
+                    Err(_err) => (),
+                }
             });
         }
 
         if redraw {
             window.erase();
-            window.printw(format!("cursor: {}\n", vertical_cursor));
+            //window.printw(format!("cursor: {}\n", vertical_cursor));
             for line in lines
                 .iter()
                 .skip(vertical_cursor)
-                .take(window.get_max_y() as usize - 1)
+                .take(window.get_max_y() as usize)
             {
                 window.printw(&line);
             }
