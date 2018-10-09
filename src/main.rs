@@ -15,6 +15,7 @@ use self::error::RatchError;
 use clap::{App, AppSettings, Arg};
 use duct::Expression;
 
+
 use pancurses::{endwin, initscr, noecho, Input};
 
 fn parse_interval(interval: Option<&str>) -> Result<f64, RatchError> {
@@ -105,9 +106,10 @@ fn run() -> Result<(), RatchError> {
 
     let mut vertical_cursor: isize = 0;
     let constrain = |cursor: isize, length: usize| -> isize {
+        let end = length as isize - window.get_max_y() as isize;
         match cursor {
             x if x < 0 => 0,
-            x if x > length as isize => length as isize,
+            x if x > end => end,
             x => x,
         }
     };
@@ -116,7 +118,6 @@ fn run() -> Result<(), RatchError> {
 
     let mut last_instant = Instant::now() - interval_duration;
 
-    let mut previous_keys = VecDeque::new();
     let mut current_msg = 0;
     let mut lines = Vec::new();
     'top: loop {
