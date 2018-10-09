@@ -60,24 +60,28 @@ fn run() -> Result<(), RatchError> {
                 .default_value("2.0")
                 .help("Interval to update the program"),
         )
-        .arg(Arg::with_name("async")
-                .short("a")
-                .long("async")
-                .help("Run the command asynchronously every interval, does not wait for the previous command to finish.")
+        .arg(
+            Arg::with_name("debug")
+                .short("d")
+                .long("debug")
+                .help("Prints debug information outside of the window"),
         )
-        .arg(Arg::with_name("debug")
-             .short("d")
-             .long("debug")
-             .help("Prints debug information outside of the window")
-         )
+        .arg(
+            Arg::with_name("unconstrain")
+                .short("u")
+                .long("unconstrain")
+                .help("Doesn't prevent the cursor from going outside of the output of the program"),
+        )
         .arg(Arg::with_name("command").required(true).multiple(true))
         .get_matches();
 
     let debug = matches.is_present("debug");
+    let unconstrained = matches.is_present("unconstrain");
+
     let interval = parse_interval(matches.value_of("interval"))?;
     if debug {
         println!("Interval: {:?}", interval);
-        println!("Async: {}", matches.is_present("async"));
+        println!("Unconstrained: {:?}", unconstrained);
     }
 
     let interval_duration = Duration::from_nanos((interval * 1_000_000_000.0) as u64);
@@ -99,12 +103,20 @@ fn run() -> Result<(), RatchError> {
     window.nodelay(true);
     noecho();
 
-    let mut vertical_cursor: usize = 0;
+    let mut vertical_cursor: isize = 0;
+    let constrain = |cursor: isize, length: usize| -> isize {
+        match cursor {
+            x if x < 0 => 0,
+            x if x > length as isize => length as isize,
+            x => x,
+        }
+    };
 
     let (sender, receiver) = mpsc::channel();
 
     let mut last_instant = Instant::now() - interval_duration;
 
+    let mut previous_keys = VecDeque::new();
     let mut current_msg = 0;
     let mut lines = Vec::new();
     'top: loop {
@@ -116,18 +128,26 @@ fn run() -> Result<(), RatchError> {
                 }
                 Some(Input::Character('j')) | Some(Input::KeyDown) => {
                     vertical_cursor = vertical_cursor.saturating_add(1);
-                    if vertical_cursor > lines.len() {
-                        vertical_cursor = lines.len();
-                    }
                     redraw = true;
                 }
                 Some(Input::Character('k')) | Some(Input::KeyUp) => {
                     vertical_cursor = vertical_cursor.saturating_sub(1);
                     redraw = true;
                 }
+                Some(Input::Character('G')) => {
+                    let end = (lines.len() - window.get_max_y() as usize) as isize;
+                    if end > vertical_cursor {
+                        vertical_cursor = end;
+                        redraw = true;
+                    }
+                }
                 Some(_) => (),
                 None => break,
             }
+        }
+
+        if !unconstrained {
+            vertical_cursor = constrain(vertical_cursor, lines.len());
         }
 
         match receiver.try_recv() {
@@ -168,13 +188,12 @@ fn run() -> Result<(), RatchError> {
 
         if redraw {
             window.erase();
-            //window.printw(format!("cursor: {}\n", vertical_cursor));
-            for line in lines
-                .iter()
-                .skip(vertical_cursor)
-                .take(window.get_max_y() as usize)
-            {
-                window.printw(&line);
+            for index in vertical_cursor..(vertical_cursor + window.get_max_y() as isize) {
+                if index < 0 || index >= lines.len() as isize {
+                    window.printw("\n");
+                } else {
+                    window.printw(&lines[index as usize]);
+                }
             }
             window.refresh();
         }
