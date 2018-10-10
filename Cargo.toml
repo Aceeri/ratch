@@ -1,6 +1,6 @@
 [package]
 name = "ratch"
-version = "0.3.0"
+version = "0.3.1"
 authors = ["Aceeri <conmcclusk@gmail.com>"]
 description = "An alternative to `watch`, with scrolling buffers."
 documentation = "https://docs.rs/crate/ratch"
