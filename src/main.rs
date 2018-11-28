@@ -1,22 +1,27 @@
 extern crate clap;
 extern crate duct;
 extern crate os_pipe;
-extern crate pancurses;
+//extern crate pancurses;
+extern crate regex;
+extern crate termion;
 
 mod error;
 
-use std::io::Read;
+use std::io::{stdin, stdout, Read, Write};
 use std::sync::mpsc;
 use std::sync::mpsc::TryRecvError;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use self::error::RatchError;
 use clap::{App, AppSettings, Arg};
 use duct::Expression;
+use regex::Regex;
+use termion::event::{Event, Key};
+use termion::input::{MouseTerminal, TermRead};
+use termion::raw::IntoRawMode;
+use termion::terminal_size;
 
-
-use pancurses::{endwin, initscr, noecho, Input};
+use self::error::RatchError;
 
 fn parse_interval(interval: Option<&str>) -> Result<f64, RatchError> {
     match interval {
@@ -98,15 +103,30 @@ fn run() -> Result<(), RatchError> {
         println!("Command: {:?}", command.clone());
     }
 
+    //let mut debug_output = Vec::new();
+    //let mut print_debug = |s: String| {
+    //if debug {
+    //debug_output.push(s);
+    //}
+    //};
     let command = duct::cmd(command[0], &command[1..]).stderr_to_stdout();
-    let window = initscr();
-    window.keypad(true);
-    window.nodelay(true);
-    noecho();
+    let mut stdout = MouseTerminal::from(stdout().into_raw_mode().unwrap());
+    //let window = initscr();
+    //window.keypad(true);
+    //window.nodelay(true);
+
+    //let mut attributes = Attributes::new();
+    //attributes.set_italic(true);
+    //window.attron(attributes);
+    //noecho();
 
     let mut vertical_cursor: isize = 0;
     let constrain = |cursor: isize, length: usize| -> isize {
-        let end = length as isize - window.get_max_y() as isize;
+        let y = match terminal_size() {
+            Ok((_, y)) => y as isize,
+            Err(_) => cursor,
+        };
+        let end = length as isize - y as isize - 1;
         match cursor {
             x if x < 0 => 0,
             x if x > end => end,
@@ -118,32 +138,76 @@ fn run() -> Result<(), RatchError> {
 
     let mut last_instant = Instant::now() - interval_duration;
 
+    let mut searching = false;
+    let mut last_search = "".to_owned();
+    let mut search = "".to_owned();
+    let mut search_regex = None;
     let mut current_msg = 0;
     let mut lines = Vec::new();
     'top: loop {
         let mut redraw = false;
-        loop {
-            match window.getch() {
-                Some(Input::KeyDC) | Some(Input::Character('q')) | Some(Input::Character('Q')) => {
-                    break 'top
-                }
-                Some(Input::Character('j')) | Some(Input::KeyDown) => {
-                    vertical_cursor = vertical_cursor.saturating_add(1);
-                    redraw = true;
-                }
-                Some(Input::Character('k')) | Some(Input::KeyUp) => {
-                    vertical_cursor = vertical_cursor.saturating_sub(1);
-                    redraw = true;
-                }
-                Some(Input::Character('G')) => {
-                    let end = (lines.len() - window.get_max_y() as usize) as isize;
-                    if end > vertical_cursor {
-                        vertical_cursor = end;
+        let stdin = stdin();
+        for event in stdin.events() {
+            if let Ok(event) = event {
+                match event {
+                    //Event::Key(Key::Enter)
+                    Event::Key(Key::Char('\n'))
+                    | Event::Key(Key::Char('\r'))
+                        if searching =>
+                    {
+                        searching = false;
+                        search = "".to_owned();
                         redraw = true;
                     }
+                    Event::Key(Key::Backspace) | Event::Key(Key::Char('\u{7f}')) if searching => {
+                        search.pop();
+                        redraw = true;
+                    }
+                    Event::Key(Key::Char(character)) if searching => {
+                        search += &character.to_string();
+                        redraw = true;
+                    }
+                    Event::Key(Key::Char('q')) | Event::Key(Key::Char('Q')) => break 'top,
+                    Event::Key(Key::Char('j')) | Event::Key(Key::Down) => {
+                        vertical_cursor = vertical_cursor.saturating_add(1);
+                        redraw = true;
+                    }
+                    Event::Key(Key::Char('k')) | Event::Key(Key::Up) => {
+                        vertical_cursor = vertical_cursor.saturating_sub(1);
+                        redraw = true;
+                    }
+                    Event::Key(Key::Char('G')) => {
+                        if let Ok((_, y)) = terminal_size() {
+                            let end = (lines.len() - y as usize) as isize;
+                            if end > vertical_cursor {
+                                vertical_cursor = end;
+                                redraw = true;
+                            }
+                        }
+                    }
+                    Event::Key(Key::Char('g')) => {
+                        vertical_cursor = 0;
+                        redraw = true;
+                    }
+                    Event::Key(Key::Char('/')) => {
+                        searching = true;
+                        search = "".to_owned();
+                        redraw = true;
+                    }
+                    Event::Key(Key::PageUp) => {
+                        if let Ok((x, y)) = terminal_size() {
+                            vertical_cursor += (y - 1) as isize;
+                            redraw = true;
+                        }
+                    }
+                    Event::Key(Key::PageDown) => {
+                        if let Ok((x, y)) = terminal_size() {
+                            vertical_cursor -= (y - 1) as isize;
+                            redraw = true;
+                        }
+                    }
+                    _ => {}
                 }
-                Some(_) => (),
-                None => break,
             }
         }
 
@@ -188,25 +252,65 @@ fn run() -> Result<(), RatchError> {
         }
 
         if redraw {
-            window.erase();
-            for index in vertical_cursor..(vertical_cursor + window.get_max_y() as isize) {
-                if index < 0 || index >= lines.len() as isize {
-                    window.printw("\n");
+            if last_search != search {
+                if search == "" {
+                    search_regex = None;
                 } else {
-                    window.printw(&lines[index as usize]);
+                    search_regex = Some(Regex::new(&search)?);
                 }
+
+                last_search = search.clone();
             }
-            window.refresh();
+
+            write!(stdout, "{}", termion::clear::All).unwrap();
+
+            if let Ok((_, y)) = terminal_size() {
+                for index in vertical_cursor..((vertical_cursor + y as isize) - 1) {
+                    if index < 0 || index >= lines.len() as isize {
+                        write!(stdout, "\n").unwrap();
+                    } else {
+                        let line = &lines[index as usize];
+                        if let Some(ref search_regex) = search_regex {
+                            if let Some(mat) = search_regex.find(line) {
+                                let (start, end) = (mat.start(), mat.end());
+                                //window.addstr("\x1B[48m");
+                                //window.addch('1');
+                                //window.addch('B');
+                                //window.addch('[');
+                                //window.addch('4');
+                                //window.addch('8');
+                                //window.addch('m');
+                                //window.printw(format!("{}, {};", start, end));
+                                //window.addstr("test");
+                                //window.attroff(ColorPair(1));
+                                //window.attroff(attributes);
+                            }
+                        }
+                        write!(stdout, "{}{}", termion::cursor::Goto(0, index as u16), line);
+                    }
+                }
+
+                if searching {
+                    write!(stdout, "/{}", search).unwrap();
+                } else {
+                    write!(stdout, ":").unwrap();
+                }
+
+                stdout.flush().unwrap();
+            }
         }
 
         thread::sleep(Duration::from_millis(8));
     }
 
+    //for line in debug_output {
+    //println!("{}", line);
+    //}
     Ok(())
 }
 
 fn main() -> Result<(), RatchError> {
     let result = run();
-    endwin();
+    //endwin();
     result
 }
